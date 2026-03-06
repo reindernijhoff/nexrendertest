@@ -5,7 +5,7 @@ yarn.lock
 
 # Directories
 workpath/
-test*
+test.aep Logs/
 results/
 
 # OS files
