@@ -9,17 +9,17 @@
       "type": "image",
       "src": "file:///git/nexrendertest/freek.jpg",
       "useOriginal": "true",
-      "layerName": "monks-logo.png"
+      "layerName": "[image]"
     },
     {
       "type": "data",
-      "layerName": "[test]",
+      "layerName": "[text]",
       "property": "Source Text",
       "value": "Hello world!"
     },
     {
       "type": "data",
-      "layerName": "Background",
+      "layerName": "[background]",
       "property": "Layer Styles.Color Overlay.Color",
       "value": [1,1,0]
     }
