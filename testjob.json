@@ -12,10 +12,16 @@
       "layerName": "[image]"
     },
     {
-      "type": "data",
-      "layerName": "[text]",
-      "property": "Source Text",
-      "value": "Hello world!"
+      "type": "script",
+      "src": "file:///git/nexrendertest/scripttest.jsx",
+      "useOriginal": "true",
+      "parameters": [
+        {
+          "type": "string",
+          "key": "name",
+          "value": "This text goes on line two!"
+        }
+      ]
     },
     {
       "type": "data",

@@ -18,7 +18,7 @@ const main = async () => {
         const normalizedColor = color.map(c => c / max);
 
         job.assets[0].src = `file:///git/nexrendertest/${name}.jpg`;
-        job.assets[1].value = `${greeting} ${uppercaseFirst(name)}!`;
+        job.assets[1].parameters[0].value = `${greeting} ${uppercaseFirst(name)}!`;
         job.assets[2].value = normalizedColor;
         job.actions.postrender[1].output = `C:/git/nexrendertest/results/output_${`${i}`.padStart(2, '0')}.mp4`;
         const result = await render(job);
