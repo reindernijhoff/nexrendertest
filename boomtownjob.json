@@ -1,0 +1,29 @@
+{
+  "template": {
+    "src": "file:///git/nexrendertest/modules_optimized/boomtown_module-00_start_v004.aep",
+    "useOriginal": "true",
+    "composition": "boomtown_module-00_start_v004"
+  },
+  "assets": [
+     {
+         "type": "data",
+         "layerName": "base_name",
+         "property": "Source Text",
+         "value": "TEST"
+     }
+  ],
+  "actions": {
+    "postrender": [
+      {
+        "module": "@nexrender/action-encode",
+        "preset": "mp4",
+        "output": "encoded.mp4"
+      },
+      {
+        "module": "@nexrender/action-copy",
+        "input": "encoded.mp4",
+        "output": "C:/git/nexrendertest/results/myresult.mp4"
+      }
+    ]
+  }
+}

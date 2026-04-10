@@ -19,3 +19,8 @@ Thumbs.db
 *.swo
 *~
 
+/modules_nexrender/
+/modules_optimized/
+/Adobe*
+/test/
+dist/
