@@ -1,5 +1,13 @@
 import type {VideoSegment} from "./types.js";
 import fs from "node:fs";
+import {promisify} from "node:util";
+import {execFile} from "node:child_process";
+
+export const execFileAsync = promisify(execFile) as (
+    file: string,
+    args: string[],
+    options: { timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
 export function cleanupTempFiles(
     segments: VideoSegment[],

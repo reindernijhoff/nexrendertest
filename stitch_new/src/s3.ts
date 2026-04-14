@@ -1,15 +1,7 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type {VideoSegment} from './types.js';
-import { runParallel } from './utils.js';
-
-const execFileAsync = promisify(execFile) as (
-    file: string,
-    args: string[],
-    options: { timeout?: number },
-) => Promise<{ stdout: string; stderr: string }>;
+import {execFileAsync, runParallel} from './utils.js';
 
 /**
  * Download a file from S3 to a local path using AWS CLI.
