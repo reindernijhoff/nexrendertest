@@ -2,8 +2,13 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import type {VideoSegment} from './types.js';
 
-const execFileAsync = promisify(execFile);
+const execFileAsync = promisify(execFile) as (
+    file: string,
+    args: string[],
+    options: { timeout?: number },
+) => Promise<{ stdout: string; stderr: string }>;
 
 /**
  * Download a file from S3 to a local path using AWS CLI.
@@ -60,79 +65,70 @@ async function downloadAndValidate(s3Path: string, localFile: string, minSize = 
 }
 
 /**
- * Resolve video paths: download from S3 if needed, otherwise return local path.
- * Supports both full S3 URIs (s3://bucket/key) and relative keys
- * (resolved against bucket/inputDir).
- * Downloads happen in parallel (up to 8 concurrent).
+ * Resolve video paths: download from S3 if needed, otherwise validate local.
+ * Sets localVideo on each segment. Downloads in parallel (up to 8 concurrent).
  */
 export async function resolveInputFiles(
-  paths: string[],
-  tmpDir: string,
-  bucket?: string,
-  inputDir?: string,
-): Promise<string[]> {
-  const localPaths: string[] = new Array(paths.length);
+    segments: VideoSegment[],
+    tmpDir: string,
+    bucket?: string,
+    inputDir?: string,
+): Promise<void> {
+    const tasks = segments.map((seg, i) => async () => {
+        const p = seg.srcVideo;
+        if (p.startsWith('s3://')) {
+            const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
+            await downloadAndValidate(p, localFile);
+            seg.localVideo = localFile;
+        } else if (bucket && inputDir) {
+            const s3Path = `s3://${bucket}/${inputDir}/${p}`;
+            const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
+            await downloadAndValidate(s3Path, localFile);
+            seg.localVideo = localFile;
+        } else {
+            if (!fs.existsSync(p)) {
+                throw new Error(`Input file not found: ${p}`);
+            }
+            seg.localVideo = path.resolve(p);
+        }
+    });
 
-  const tasks = paths.map((p, i) => async () => {
-    if (p.startsWith('s3://')) {
-      const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
-      await downloadAndValidate(p, localFile);
-      localPaths[i] = localFile;
-    } else if (bucket && inputDir) {
-      const s3Path = `s3://${bucket}/${inputDir}/${p}`;
-      const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
-      await downloadAndValidate(s3Path, localFile);
-      localPaths[i] = localFile;
-    } else {
-      if (!fs.existsSync(p)) {
-        throw new Error(`Input file not found: ${p}`);
-      }
-      localPaths[i] = path.resolve(p);
-    }
-  });
-
-  // Run downloads in parallel (max 8)
-  await runParallel(tasks, 8);
-  return localPaths;
+    await runParallel(tasks, 8);
 }
 
 /**
- * Resolve audio paths: download from S3 if needed, otherwise return local path.
- * Downloads happen in parallel (up to 4 concurrent).
- * Empty strings are passed through as null.
+ * Resolve audio paths: download from S3 if needed, otherwise validate local.
+ * Sets localAudio on each segment. Downloads in parallel (up to 4 concurrent).
  */
 export async function resolveAudioFiles(
-  paths: string[],
-  tmpDir: string,
-  bucket?: string,
-  audioDir?: string,
-): Promise<(string | null)[]> {
-  const localPaths: (string | null)[] = new Array(paths.length).fill(null);
+    segments: VideoSegment[],
+    tmpDir: string,
+    bucket?: string,
+    audioDir?: string,
+): Promise<void> {
+    const tasks = segments.map((seg, i) => async () => {
+        const p = seg.srcAudio;
+        if (!p || p.trim() === '') return;
 
-  const tasks = paths.map((p, i) => async () => {
-    if (!p || p.trim() === '') return;
+        if (p.startsWith('s3://')) {
+            const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
+            await downloadAndValidate(p, localFile);
+            seg.localAudio = localFile;
+        } else if (bucket && audioDir) {
+            const s3Path = `s3://${bucket}/${audioDir}/${p}`;
+            const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
+            await downloadAndValidate(s3Path, localFile);
+            seg.localAudio = localFile;
+        } else {
+            if (fs.existsSync(p)) {
+                seg.localAudio = path.resolve(p);
+            } else {
+                console.warn(`  Audio file not found, skipping: ${p}`);
+            }
+        }
+    });
 
-    if (p.startsWith('s3://')) {
-      const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
-      await downloadAndValidate(p, localFile);
-      localPaths[i] = localFile;
-    } else if (bucket && audioDir) {
-      const s3Path = `s3://${bucket}/${audioDir}/${p}`;
-      const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
-      await downloadAndValidate(s3Path, localFile);
-      localPaths[i] = localFile;
-    } else {
-      if (fs.existsSync(p)) {
-        localPaths[i] = path.resolve(p);
-      } else {
-        console.warn(`  Audio file not found, skipping: ${p}`);
-      }
-    }
-  });
-
-  // Run downloads in parallel (max 4)
-  await runParallel(tasks, 4);
-  return localPaths;
+    await runParallel(tasks, 4);
 }
 
 /**
