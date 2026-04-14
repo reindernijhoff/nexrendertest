@@ -22,7 +22,7 @@ export async function getVideoDuration(filepath: string, maxRetries = 3): Promis
   }
 
   // Small delay to ensure file is fully flushed to disk
-  await sleep(100);
+  // await sleep(100);
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
