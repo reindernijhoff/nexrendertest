@@ -8,8 +8,11 @@ export interface VideoSegment {
     overlapAfter: number;
     startTime: number;
     first?: string;
+    firstDuration: number;
     middle: string;
+    middleDuration: number;
     last?: string;
+    lastDuration: number;
 }
 
 export interface AccelParams {

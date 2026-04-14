@@ -8,13 +8,10 @@ import {
     calculateTimings,
     createAllTransitions,
     overlayAudio,
-    selectBackgroundTrack,
-    selectBackgroundTrackName,
     splitAllVideos,
     stitchSegments,
 } from './pipeline.js';
-import {getVideoDuration} from './ffmpeg.js';
-import {downloadBackgroundTrack, resolveAudioFiles, resolveInputFiles, uploadToS3,} from './s3.js';
+import {resolveAudioFiles, resolveBackgroundTrack, resolveInputFiles, uploadToS3,} from './s3.js';
 import {cleanupTempFiles} from './utils.js';
 
 const program = new Command();
@@ -65,7 +62,7 @@ program
         const blend = options.blend ?? 0.0;
         const tmpDir = path.resolve(settings.tmpDir ?? './tmp');
         const cleanupInputFiles = settings.cleanupInputFiles ?? true;
-        const bgAudioDir = input.bgAudioDir ? path.resolve(input.bgAudioDir) : undefined;
+        const bgTracks: Record<string, string> = input.bgTracks ?? {};
 
         try {
             const totalStart = Date.now();
@@ -92,7 +89,10 @@ program
                 overlapBefore: i > 0 ? overlaps[i - 1] : 0,
                 overlapAfter: i < videos.length - 1 ? overlaps[i] : 0,
                 startTime: 0,
+                firstDuration: 0,
                 middle: '',
+                middleDuration: 0,
+                lastDuration: 0,
             }));
 
             console.log(`\nStitch pipeline: ${segments.length} videos (${isS3 ? 'S3' : 'local'} mode)`);
@@ -116,24 +116,17 @@ program
 
             console.log('\n=== Step 4: Stitching final video ===');
             const videoOnlyOutput = output.replace(/\.mp4$/, '_video_only.mp4');
-            await stitchSegments(segments, transitions, videoOnlyOutput);
+            const stitchedDuration = await stitchSegments(segments, transitions, videoOnlyOutput);
 
             console.log('\n=== Step 5: Calculating segment timings ===');
-            await calculateTimings(segments, transitions);
+            const calculatedDuration = calculateTimings(segments, transitions);
+            console.log(`  Probed: ${stitchedDuration.toFixed(3)}s vs calculated: ${calculatedDuration.toFixed(3)}s`);
 
-            const videoDuration = await getVideoDuration(videoOnlyOutput);
-            let bgTrack: string | null = null;
-            if (bgAudioDir) {
-                bgTrack = selectBackgroundTrack(videoDuration, bgAudioDir);
-            } else if (isS3 && s3.audioDir) {
-                const bgFile = selectBackgroundTrackName(videoDuration);
-                if (bgFile) {
-                    bgTrack = await downloadBackgroundTrack(bgFile, tmpDir, s3.bucket!, s3.audioDir);
-                }
-            }
+            console.log('\n=== Step 6: Background track ===');
+            const bgTrack = await resolveBackgroundTrack(bgTracks, stitchedDuration, tmpDir, s3.bucket, s3.audioDir);
 
             console.log('\n=== Step 7: Audio overlay ===');
-            await overlayAudio(videoOnlyOutput, segments, bgTrack, output);
+            await overlayAudio(videoOnlyOutput, segments, bgTrack, stitchedDuration, output);
 
             let resultPath = output;
             if (isS3 && s3.outputDir) {
@@ -154,7 +147,7 @@ program
 
             console.log(`\n=== Done ===`);
             console.log(`  Output: ${resultPath}`);
-            console.log(`  Duration: ${videoDuration.toFixed(1)}s`);
+            console.log(`  Duration: ${stitchedDuration.toFixed(1)}s`);
             console.log(`  Size: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
             console.log(`  Total time: ${totalTime.toFixed(1)}s`);
         } catch (err) {

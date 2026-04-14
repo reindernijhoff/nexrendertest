@@ -2,31 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type {AccelParams, VideoSegment} from './types.js';
 import {detectAcceleration, getVideoDuration, hexToChromaKeyColor, runFfmpeg,} from './ffmpeg.js';
-
-// ---------------------------------------------------------------------------
-// Concurrency helper (avoids external dependency)
-// ---------------------------------------------------------------------------
-
-function pLimit(concurrency: number) {
-    let active = 0;
-    const queue: (() => void)[] = [];
-
-    return <T>(fn: () => Promise<T>): Promise<T> => {
-        return new Promise<T>((resolve, reject) => {
-            const run = () => {
-                active++;
-                fn()
-                    .then(resolve, reject)
-                    .finally(() => {
-                        active--;
-                        if (queue.length > 0) queue.shift()!();
-                    });
-            };
-            if (active < concurrency) run();
-            else queue.push(run);
-        });
-    };
-}
+import {pLimit} from 'utils.js';
 
 // ---------------------------------------------------------------------------
 // Step 1: Analyze — get durations for all input videos
@@ -86,12 +62,14 @@ async function splitVideo(seg: VideoSegment, index: number, outputDir: string, a
     if (seg.overlapBefore > 0) {
         seg.first = path.join(outputDir, `video_${index}_first.mp4`);
         await createSegment(seg.localVideo, seg.first, accel, 0, seg.overlapBefore);
+        seg.firstDuration = await getVideoDuration(seg.first);
     }
 
     // Last part (transition layer)
     if (seg.overlapAfter > 0 && seg.duration > seg.overlapAfter) {
         seg.last = path.join(outputDir, `video_${index}_last.mp4`);
         await createSegment(seg.localVideo, seg.last, accel, seg.duration - seg.overlapAfter, seg.overlapAfter);
+        seg.lastDuration = await getVideoDuration(seg.last);
     }
 
     // Middle part (plays as-is between transitions)
@@ -112,6 +90,7 @@ async function splitVideo(seg: VideoSegment, index: number, outputDir: string, a
             ]);
         }
     }
+    seg.middleDuration = await getVideoDuration(seg.middle);
 }
 
 export async function splitAllVideos(segments: VideoSegment[], tmpDir: string): Promise<void> {
@@ -209,7 +188,7 @@ export async function stitchSegments(
     segments: VideoSegment[],
     transitions: (string | null)[],
     outputPath: string,
-): Promise<string> {
+): Promise<number> {
     // Build the sequence: middle₀ → transition₀₁ → middle₁ → transition₁₂ → ...
     const sequenceFiles: string[] = [];
     for (let i = 0; i < segments.length; i++) {
@@ -260,73 +239,46 @@ export async function stitchSegments(
 
     const stat = fs.statSync(outputPath);
     console.log(`Stitched video: ${(stat.size / 1024 / 1024).toFixed(1)}MB`);
-    return outputPath;
+    return await getVideoDuration(outputPath);
 }
 
 // ---------------------------------------------------------------------------
 // Step 5: Calculate when each video segment starts in the final timeline
 // ---------------------------------------------------------------------------
 
-export async function calculateTimings(
+export function calculateTimings(
     segments: VideoSegment[],
     transitions: (string | null)[],
-): Promise<void> {
+): number {
     let currentTime = 0;
 
     for (let i = 0; i < segments.length; i++) {
         segments[i].startTime = currentTime;
-        console.log(`  Segment ${i} starts at ${currentTime.toFixed(1)}s`);
+        console.log(`  Segment ${i} starts at ${currentTime.toFixed(3)}s`);
 
-        if (segments[i].middle && fs.existsSync(segments[i].middle)) {
-            currentTime += await getVideoDuration(segments[i].middle);
-        }
+        currentTime += segments[i].middleDuration;
+
+        // Transition duration ≈ min of adjacent overlap segments
         if (i < transitions.length && transitions[i]) {
-            currentTime += await getVideoDuration(transitions[i]!);
+            currentTime += Math.min(segments[i].lastDuration, segments[i + 1].firstDuration);
         }
     }
 
-    console.log(`Total calculated duration: ${currentTime.toFixed(1)}s`);
+    console.log(`Total calculated duration: ${currentTime.toFixed(3)}s`);
+    return currentTime;
 }
 
 // ---------------------------------------------------------------------------
-// Step 6: Select the best-matching background music track
-// ---------------------------------------------------------------------------
-
-export function selectBackgroundTrackName(videoDuration: number): string {
-    if (videoDuration <= 54) return 'bg54.wav';
-    if (videoDuration <= 55) return 'bg55.wav';
-    if (videoDuration <= 56) return 'bg56.wav';
-    if (videoDuration <= 57) return 'bg57.wav';
-    if (videoDuration <= 58) return 'bg58.wav';
-    if (videoDuration <= 59) return 'bg59.wav';
-    return 'bg60.wav';
-}
-
-export function selectBackgroundTrack(videoDuration: number, bgDir: string): string | null {
-    if (!bgDir || !fs.existsSync(bgDir)) return null;
-
-    const bgFile = selectBackgroundTrackName(videoDuration);
-    const fullPath = path.join(bgDir, bgFile);
-    if (fs.existsSync(fullPath)) {
-        console.log(`Selected background track: ${bgFile}`);
-        return fullPath;
-    }
-
-    console.warn(`Background track not found: ${fullPath}`);
-    return null;
-}
-
-// ---------------------------------------------------------------------------
-// Step 7: Mix audio — background track + per-segment audio with delays
+// Step 6: Mix audio — background track + per-segment audio with delays
 // ---------------------------------------------------------------------------
 
 export async function overlayAudio(
     videoFile: string,
     segments: VideoSegment[],
     backgroundTrack: string | null,
+    videoDuration: number,
     outputFile: string,
 ): Promise<string> {
-    const videoDuration = await getVideoDuration(videoFile);
     const args = ['-y', '-i', videoFile];
     let inputCount = 1;
 

@@ -50,18 +50,32 @@ export async function uploadToS3(localPath: string, bucket: string, s3Key: strin
 }
 
 /**
- * Download a single file from S3 with validation (min file size check).
+ * Resolve a single file: download from S3 if needed, otherwise validate local.
+ * Handles full s3:// URIs, relative S3 keys (via bucket + s3Dir), and local paths.
  */
-async function downloadAndValidate(s3Path: string, localFile: string, minSize = 1024): Promise<void> {
-  await downloadFromS3(s3Path, localFile);
-
-  if (!fs.existsSync(localFile)) {
-    throw new Error(`Download produced no file: ${s3Path}`);
-  }
-  const size = fs.statSync(localFile).size;
-  if (size < minSize) {
-    throw new Error(`Downloaded file too small (${size} bytes): ${s3Path}`);
-  }
+async function resolveFile(
+    srcPath: string,
+    localName: string,
+    tmpDir: string,
+    bucket?: string,
+    s3Dir?: string,
+): Promise<string> {
+    if (srcPath.startsWith('s3://')) {
+        const localFile = path.join(tmpDir, localName);
+        await downloadFromS3(srcPath, localFile);
+        return localFile;
+    }
+    if (bucket && s3Dir) {
+        const s3Path = `s3://${bucket}/${s3Dir}/${srcPath}`;
+        const localFile = path.join(tmpDir, localName);
+        await downloadFromS3(s3Path, localFile);
+        return localFile;
+    }
+    const resolved = path.resolve(srcPath);
+    if (!fs.existsSync(resolved)) {
+        throw new Error(`File not found: ${resolved}`);
+    }
+    return resolved;
 }
 
 /**
@@ -75,24 +89,10 @@ export async function resolveInputFiles(
     inputDir?: string,
 ): Promise<void> {
     const tasks = segments.map((seg, i) => async () => {
-        const p = seg.srcVideo;
-        if (p.startsWith('s3://')) {
-            const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
-            await downloadAndValidate(p, localFile);
-            seg.localVideo = localFile;
-        } else if (bucket && inputDir) {
-            const s3Path = `s3://${bucket}/${inputDir}/${p}`;
-            const localFile = path.join(tmpDir, `input_${i}${path.extname(p) || '.mp4'}`);
-            await downloadAndValidate(s3Path, localFile);
-            seg.localVideo = localFile;
-        } else {
-            if (!fs.existsSync(p)) {
-                throw new Error(`Input file not found: ${p}`);
-            }
-            seg.localVideo = path.resolve(p);
-        }
+        seg.localVideo = await resolveFile(
+            seg.srcVideo, `input_${i}${path.extname(seg.srcVideo) || '.mp4'}`, tmpDir, bucket, inputDir,
+        );
     });
-
     await runParallel(tasks, 8);
 }
 
@@ -107,27 +107,15 @@ export async function resolveAudioFiles(
     audioDir?: string,
 ): Promise<void> {
     const tasks = segments.map((seg, i) => async () => {
-        const p = seg.srcAudio;
-        if (!p || p.trim() === '') return;
-
-        if (p.startsWith('s3://')) {
-            const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
-            await downloadAndValidate(p, localFile);
-            seg.localAudio = localFile;
-        } else if (bucket && audioDir) {
-            const s3Path = `s3://${bucket}/${audioDir}/${p}`;
-            const localFile = path.join(tmpDir, `audio_${i}${path.extname(p) || '.wav'}`);
-            await downloadAndValidate(s3Path, localFile);
-            seg.localAudio = localFile;
-        } else {
-            if (fs.existsSync(p)) {
-                seg.localAudio = path.resolve(p);
-            } else {
-                console.warn(`  Audio file not found, skipping: ${p}`);
-            }
+        if (!seg.srcAudio || seg.srcAudio.trim() === '') return;
+        try {
+            seg.localAudio = await resolveFile(
+                seg.srcAudio, `audio_${i}${path.extname(seg.srcAudio) || '.wav'}`, tmpDir, bucket, audioDir,
+            );
+        } catch {
+            console.warn(`  Audio file not found, skipping: ${seg.srcAudio}`);
         }
     });
-
     await runParallel(tasks, 4);
 }
 
@@ -163,22 +151,32 @@ async function runParallel(tasks: (() => Promise<void>)[], concurrency: number):
 }
 
 /**
- * Download a background track from S3.
+ * Select and resolve a background track from the bgTracks map.
+ * Keys are max-duration thresholds (seconds), values are file paths (local, S3 key, or s3:// URI).
+ * Picks the smallest key >= videoDuration, or the largest key if none qualify.
  */
-export async function downloadBackgroundTrack(
-  bgFile: string,
-  tmpDir: string,
-  bucket: string,
-  audioDir: string,
+export async function resolveBackgroundTrack(
+    bgTracks: Record<string, string>,
+    videoDuration: number,
+    tmpDir: string,
+    bucket?: string,
+    audioDir?: string,
 ): Promise<string | null> {
-  const localFile = path.join(tmpDir, bgFile);
-  const s3Path = `s3://${bucket}/${audioDir}/${bgFile}`;
+    const keys = Object.keys(bgTracks).map(Number).filter(n => !isNaN(n)).sort((a, b) => a - b);
+    if (keys.length === 0) return null;
 
-  try {
-    await downloadFromS3(s3Path, localFile);
-    return localFile;
-  } catch (err) {
-    console.warn(`  Could not download background track ${bgFile}: ${(err as Error).message}`);
-    return null;
-  }
+    const selected = keys.find(k => k >= videoDuration) ?? keys[keys.length - 1];
+    const trackPath = bgTracks[String(selected)];
+    if (!trackPath) return null;
+
+    console.log(`Selected background track: ${trackPath} (threshold ${selected}s for ${videoDuration.toFixed(1)}s video)`);
+
+    try {
+        return await resolveFile(
+            trackPath, `bg_${selected}${path.extname(trackPath) || '.wav'}`, tmpDir, bucket, audioDir,
+        );
+    } catch (err) {
+        console.warn(`  Could not resolve background track: ${(err as Error).message}`);
+        return null;
+    }
 }

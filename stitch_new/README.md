@@ -48,7 +48,15 @@ node dist/index.js --file job.json
   "input": {
     "videos": ["clip0.mp4", "clip1.mp4", "clip2.mp4"],
     "audio": ["voice.mp3", "", ""],
-    "bgAudioDir": "./assets/audio"
+    "bgTracks": {
+      "54": "bg54.wav",
+      "55": "bg55.wav",
+      "56": "bg56.wav",
+      "57": "bg57.wav",
+      "58": "bg58.wav",
+      "59": "bg59.wav",
+      "60": "bg60.wav"
+    }
   },
   "output": {
     "file": "output.mp4"
@@ -78,7 +86,7 @@ node dist/index.js --file job.json
 |---|---|---|
 | `videos` | yes | Array of video file paths (local paths or S3 keys) |
 | `audio` | no | Array of per-segment audio paths, one per video. Use `""` to skip a segment. |
-| `bgAudioDir` | no | Local directory containing background audio tracks (`bg54.wav`–`bg60.wav`) |
+| `bgTracks` | no | Map of duration thresholds (seconds) to background audio file paths. The track with the smallest threshold ≥ video duration is selected. Paths can be local, S3 keys (resolved via `s3.audioDir`), or full `s3://` URIs. |
 
 ### `output`
 
@@ -121,7 +129,7 @@ When `s3.bucket` is set, video/audio paths are treated as S3 keys and downloaded
 4. **Transitions** — chroma-key composite `video[i].last` + `video[i+1].first` (only the incoming clip is keyed)
 5. **Stitch** — concatenate: `middle₀ → transition₀₁ → middle₁ → ...`
 6. **Timings** — calculate when each segment starts in the final timeline
-7. **Background track** — select and loop a background music file to match duration
+7. **Background track** — select the best-matching track from `input.bgTracks` based on video duration, download if needed
 8. **Audio overlay** — mix background + per-segment audio (delayed to segment start times)
 9. **Upload** — upload result to S3 (S3 mode only)
 10. **Cleanup** — remove intermediate files (controlled by `settings.cleanupInputFiles`)
