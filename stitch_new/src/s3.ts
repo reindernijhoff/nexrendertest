@@ -3,49 +3,39 @@ import * as path from 'node:path';
 import type {VideoSegment} from './types.js';
 import {execFileAsync, runParallel} from './utils.js';
 
-/**
- * Download a file from S3 to a local path using AWS CLI.
- */
 export async function downloadFromS3(s3Path: string, localPath: string): Promise<void> {
-  console.log(`Downloading ${s3Path}...`);
-  const start = Date.now();
+    console.log(`Downloading ${s3Path}...`);
+    const start = Date.now();
 
-  try {
-    await execFileAsync('aws', ['s3', 'cp', s3Path, localPath], { timeout: 120_000 });
-  } catch (err: unknown) {
-    const stderr = (err as { stderr?: string }).stderr ?? '';
-    throw new Error(`S3 download failed: ${stderr || (err as Error).message}`);
-  }
+    try {
+        await execFileAsync('aws', ['s3', 'cp', s3Path, localPath], {timeout: 120_000});
+    } catch (err: unknown) {
+        const stderr = (err as { stderr?: string }).stderr ?? '';
+        throw new Error(`S3 download failed: ${stderr || (err as Error).message}`);
+    }
 
-  const elapsed = ((Date.now() - start) / 1000).toFixed(1);
-  const size = fs.existsSync(localPath)
-    ? `${(fs.statSync(localPath).size / 1024 / 1024).toFixed(1)}MB`
-    : '?';
-  console.log(`  Downloaded in ${elapsed}s (${size})`);
+    const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+    const size = fs.existsSync(localPath)
+        ? `${(fs.statSync(localPath).size / 1024 / 1024).toFixed(1)}MB`
+        : '?';
+    console.log(`  Downloaded in ${elapsed}s (${size})`);
 }
 
-/**
- * Upload a local file to S3 using AWS CLI.
- */
 export async function uploadToS3(localPath: string, bucket: string, s3Key: string): Promise<string> {
-  const s3Path = `s3://${bucket}/${s3Key}`;
-  console.log(`Uploading to ${s3Path}...`);
+    const s3Path = `s3://${bucket}/${s3Key}`;
+    console.log(`Uploading to ${s3Path}...`);
 
-  try {
-    await execFileAsync('aws', ['s3', 'cp', localPath, s3Path], { timeout: 120_000 });
-  } catch (err: unknown) {
-    const stderr = (err as { stderr?: string }).stderr ?? '';
-    throw new Error(`S3 upload failed: ${stderr || (err as Error).message}`);
-  }
+    try {
+        await execFileAsync('aws', ['s3', 'cp', localPath, s3Path], {timeout: 120_000});
+    } catch (err: unknown) {
+        const stderr = (err as { stderr?: string }).stderr ?? '';
+        throw new Error(`S3 upload failed: ${stderr || (err as Error).message}`);
+    }
 
-  console.log(`  Uploaded to ${s3Path}`);
-  return s3Path;
+    console.log(`  Uploaded to ${s3Path}`);
+    return s3Path;
 }
 
-/**
- * Resolve a single file: download from S3 if needed, otherwise validate local.
- * Handles full s3:// URIs, relative S3 keys (via bucket + s3Dir), and local paths.
- */
 async function resolveFile(
     srcPath: string,
     localName: string,
@@ -71,10 +61,6 @@ async function resolveFile(
     return resolved;
 }
 
-/**
- * Resolve video paths: download from S3 if needed, otherwise validate local.
- * Sets localVideo on each segment. Downloads in parallel (up to 8 concurrent).
- */
 export async function resolveInputFiles(
     segments: VideoSegment[],
     tmpDir: string,
@@ -89,10 +75,6 @@ export async function resolveInputFiles(
     await runParallel(tasks, 8);
 }
 
-/**
- * Resolve audio paths: download from S3 if needed, otherwise validate local.
- * Sets localAudio on each segment. Downloads in parallel (up to 4 concurrent).
- */
 export async function resolveAudioFiles(
     segments: VideoSegment[],
     tmpDir: string,
@@ -112,11 +94,6 @@ export async function resolveAudioFiles(
     await runParallel(tasks, 4);
 }
 
-/**
- * Select and resolve a background track from the bgTracks map.
- * Keys are max-duration thresholds (seconds), values are file paths (local, S3 key, or s3:// URI).
- * Picks the smallest key >= videoDuration, or the largest key if none qualify.
- */
 export async function resolveBackgroundTrack(
     bgTracks: Record<string, string>,
     videoDuration: number,

@@ -4,23 +4,14 @@ import * as os from 'node:os';
 import type {AccelParams} from './types.js';
 import {execFileAsync} from "./utils.js";
 
-
 function sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/**
- * Get video duration via ffprobe with retries and fallbacks.
- * Production-hardened: handles freshly-written files, ffprobe flakiness,
- * and falls back to parsing ffmpeg stderr or estimating from file size.
- */
 export async function getVideoDuration(filepath: string, maxRetries = 3): Promise<number> {
     if (!fs.existsSync(filepath)) {
         throw new Error(`File not found: ${filepath}`);
     }
-
-    // Small delay to ensure file is fully flushed to disk
-    // await sleep(100);
 
     for (let attempt = 0; attempt < maxRetries; attempt++) {
         try {
@@ -45,18 +36,12 @@ export async function getVideoDuration(filepath: string, maxRetries = 3): Promis
         }
     }
 
-    // All retries failed — use fallback method
     console.warn(`  All ffprobe attempts failed for ${path.basename(filepath)}, trying fallback...`);
     return getDurationFallback(filepath);
 }
 
-/**
- * Fallback: parse duration from `ffmpeg -i` stderr output.
- * Last resort: estimate from file size.
- */
 async function getDurationFallback(filepath: string): Promise<number> {
     try {
-        // ffmpeg -i <file> -f null - exits with error but prints duration in stderr
         await execFileAsync('ffmpeg', ['-i', filepath, '-f', 'null', '-'], {timeout: 60_000});
     } catch (err: unknown) {
         const stderr = (err as { stderr?: string }).stderr ?? '';
@@ -69,17 +54,12 @@ async function getDurationFallback(filepath: string): Promise<number> {
         }
     }
 
-    // Last resort: rough estimate from file size (~2MB/s for typical video)
     const stat = fs.statSync(filepath);
     const estimated = Math.max(1.0, stat.size / (1024 * 1024) / 2);
     console.warn(`  Using estimated duration from file size: ${estimated.toFixed(2)}s`);
     return estimated;
 }
 
-/**
- * Auto-detect the best encoding acceleration available on this system.
- * Checks NVENC (NVIDIA GPU), QSV (Intel), then falls back to CPU libx264.
- */
 let cachedAccel: AccelParams | null = null;
 
 export async function detectAcceleration(): Promise<AccelParams> {
@@ -88,7 +68,6 @@ export async function detectAcceleration(): Promise<AccelParams> {
     try {
         const {stdout} = await execFileAsync('ffmpeg', ['-hide_banner', '-encoders'], {timeout: 10_000});
 
-        // Check NVIDIA NVENC
         if (stdout.includes('h264_nvenc')) {
             try {
                 await execFileAsync('ffmpeg', [
@@ -108,7 +87,6 @@ export async function detectAcceleration(): Promise<AccelParams> {
             }
         }
 
-        // Check Intel Quick Sync
         if (stdout.includes('h264_qsv')) {
             try {
                 await execFileAsync('ffmpeg', [
@@ -130,7 +108,6 @@ export async function detectAcceleration(): Promise<AccelParams> {
     } catch { /* detection failed */
     }
 
-    // Fallback to CPU
     const cpuCount = os.cpus().length;
     console.log(`Using CPU encoding with ${cpuCount} threads`);
     cachedAccel = {
@@ -142,9 +119,6 @@ export async function detectAcceleration(): Promise<AccelParams> {
     return cachedAccel;
 }
 
-/**
- * Run an ffmpeg command. Throws on non-zero exit code.
- */
 export async function runFfmpeg(args: string[]): Promise<{ stdout: string; stderr: string }> {
     const preview = args.slice(0, 12).join(' ');
     console.log(`  ffmpeg ${preview}${args.length > 12 ? '...' : ''}`);
@@ -160,27 +134,6 @@ export async function runFfmpeg(args: string[]): Promise<{ stdout: string; stder
     }
 }
 
-/**
- * Check whether a file contains an audio stream.
- */
-export async function hasAudioStream(filepath: string): Promise<boolean> {
-    try {
-        const {stdout} = await execFileAsync('ffprobe', [
-            '-v', 'quiet',
-            '-select_streams', 'a:0',
-            '-show_entries', 'stream=codec_type',
-            '-of', 'csv=p=0',
-            filepath,
-        ], {timeout: 10_000});
-        return stdout.includes('audio');
-    } catch {
-        return false;
-    }
-}
-
-/**
- * Convert a hex color string (#RRGGBB) to ffmpeg chromakey format (0xRRGGBB).
- */
 export function hexToChromaKeyColor(hex: string): string {
     const cleaned = hex.replace('#', '');
     if (cleaned.length !== 6) {

@@ -68,7 +68,6 @@ program
             const totalStart = Date.now();
             fs.mkdirSync(tmpDir, {recursive: true});
 
-            // Normalize overlap into a per-transition array of length N-1
             const overlaps: number[] = Array.isArray(overlap)
                 ? overlap
                 : new Array(Math.max(0, videos.length - 1)).fill(overlap);
@@ -79,7 +78,6 @@ program
                 );
             }
 
-            // Build segments — single source of truth for all per-video data
             const segments: VideoSegment[] = videos.map((v, i) => ({
                 srcVideo: isS3 ? v : path.resolve(v),
                 srcAudio: rawAudio[i]?.trim() || null,

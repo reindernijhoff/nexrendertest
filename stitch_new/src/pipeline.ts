@@ -2,11 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type {AccelParams, VideoSegment} from './types.js';
 import {detectAcceleration, getVideoDuration, hexToChromaKeyColor, runFfmpeg,} from './ffmpeg.js';
-import {pLimit} from 'utils.js';
-
-// ---------------------------------------------------------------------------
-// Step 1: Analyze — get durations for all input videos
-// ---------------------------------------------------------------------------
+import {pLimit} from './utils.js';
 
 export async function analyzeVideos(segments: VideoSegment[]): Promise<void> {
     const limit = pLimit(8);
@@ -23,10 +19,6 @@ export async function analyzeVideos(segments: VideoSegment[]): Promise<void> {
         ),
     );
 }
-
-// ---------------------------------------------------------------------------
-// Step 2: Split each video into first / middle / last segments
-// ---------------------------------------------------------------------------
 
 async function createSegment(
     inputFile: string,
@@ -58,25 +50,21 @@ async function createSegment(
 async function splitVideo(seg: VideoSegment, index: number, outputDir: string, accel: AccelParams): Promise<void> {
     console.log(`Splitting video ${index}: ${path.basename(seg.localVideo)} (overlap before=${seg.overlapBefore}s after=${seg.overlapAfter}s)`);
 
-    // First part (transition layer) — skip for video 0 (nothing to transition from)
     if (seg.overlapBefore > 0) {
         seg.first = path.join(outputDir, `video_${index}_first.mp4`);
         await createSegment(seg.localVideo, seg.first, accel, 0, seg.overlapBefore);
         seg.firstDuration = await getVideoDuration(seg.first);
     }
 
-    // Last part (transition layer)
     if (seg.overlapAfter > 0 && seg.duration > seg.overlapAfter) {
         seg.last = path.join(outputDir, `video_${index}_last.mp4`);
         await createSegment(seg.localVideo, seg.last, accel, seg.duration - seg.overlapAfter, seg.overlapAfter);
         seg.lastDuration = await getVideoDuration(seg.last);
     }
 
-    // Middle part (plays as-is between transitions)
     seg.middle = path.join(outputDir, `video_${index}_middle.mp4`);
 
     if (seg.overlapBefore === 0) {
-        // First video: middle = everything except the last overlap
         await createSegment(seg.localVideo, seg.middle, accel, 0, seg.duration - seg.overlapAfter);
     } else {
         const middleDuration = seg.duration - seg.overlapBefore - seg.overlapAfter;
@@ -103,10 +91,6 @@ export async function splitAllVideos(segments: VideoSegment[], tmpDir: string): 
         ),
     );
 }
-
-// ---------------------------------------------------------------------------
-// Step 3: Create chroma-key transitions between adjacent videos
-// ---------------------------------------------------------------------------
 
 async function createTransition(
     endVideo: string,
@@ -156,7 +140,6 @@ export async function createAllTransitions(
     blend: number,
 ): Promise<(string | null)[]> {
     const accel = await detectAcceleration();
-    // Limit to 2 concurrent transitions — NVENC has limited encoding sessions
     const limit = pLimit(2);
 
     const transitions: (string | null)[] = new Array(segments.length - 1).fill(null);
@@ -180,16 +163,11 @@ export async function createAllTransitions(
     return transitions;
 }
 
-// ---------------------------------------------------------------------------
-// Step 4: Concatenate all segments into the final video
-// ---------------------------------------------------------------------------
-
 export async function stitchSegments(
     segments: VideoSegment[],
     transitions: (string | null)[],
     outputPath: string,
 ): Promise<number> {
-    // Build the sequence: middle₀ → transition₀₁ → middle₁ → transition₁₂ → ...
     const sequenceFiles: string[] = [];
     for (let i = 0; i < segments.length; i++) {
         if (segments[i].middle && fs.existsSync(segments[i].middle)) {
@@ -200,7 +178,6 @@ export async function stitchSegments(
         }
     }
 
-    // Write ffmpeg concat demuxer file
     const concatFile = path.join(path.dirname(outputPath), 'concat_list.txt');
     const lines = sequenceFiles.map((f, i) => {
         const normalized = f.replace(/\\/g, '/');
@@ -210,14 +187,12 @@ export async function stitchSegments(
     });
     fs.writeFileSync(concatFile, lines.join('\n'));
 
-    // Try stream copy first (fastest — no re-encoding)
     try {
         await runFfmpeg([
             '-y', '-f', 'concat', '-safe', '0', '-i', concatFile,
             '-c', 'copy', '-movflags', '+faststart', outputPath,
         ]);
     } catch {
-        // Fallback: re-encode if codec parameters differ between segments
         console.log('Stream copy failed, re-encoding...');
         const accel = await detectAcceleration();
         const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile];
@@ -242,10 +217,6 @@ export async function stitchSegments(
     return await getVideoDuration(outputPath);
 }
 
-// ---------------------------------------------------------------------------
-// Step 5: Calculate when each video segment starts in the final timeline
-// ---------------------------------------------------------------------------
-
 export function calculateTimings(
     segments: VideoSegment[],
     transitions: (string | null)[],
@@ -258,7 +229,6 @@ export function calculateTimings(
 
         currentTime += segments[i].middleDuration;
 
-        // Transition duration ≈ min of adjacent overlap segments
         if (i < transitions.length && transitions[i]) {
             currentTime += Math.min(segments[i].lastDuration, segments[i + 1].firstDuration);
         }
@@ -267,10 +237,6 @@ export function calculateTimings(
     console.log(`Total calculated duration: ${currentTime.toFixed(3)}s`);
     return currentTime;
 }
-
-// ---------------------------------------------------------------------------
-// Step 6: Mix audio — background track + per-segment audio with delays
-// ---------------------------------------------------------------------------
 
 export async function overlayAudio(
     videoFile: string,
@@ -282,7 +248,6 @@ export async function overlayAudio(
     const args = ['-y', '-i', videoFile];
     let inputCount = 1;
 
-    // Background track input
     let bgInputIndex: number | null = null;
     if (backgroundTrack && fs.existsSync(backgroundTrack)) {
         args.push('-i', backgroundTrack);
@@ -290,7 +255,6 @@ export async function overlayAudio(
         console.log(`  Background track: input ${bgInputIndex} (${path.basename(backgroundTrack)})`);
     }
 
-    // Per-segment audio inputs
     const audioInputMap = new Map<number, number>();
     for (let i = 0; i < segments.length; i++) {
         const af = segments[i].localAudio;
@@ -309,17 +273,14 @@ export async function overlayAudio(
         return outputFile;
     }
 
-    // Build filter_complex
     const filters: string[] = [];
     const audioStreams: string[] = [];
 
-    // Background: loop to fill video duration, then trim
     if (bgInputIndex !== null) {
         filters.push(`[${bgInputIndex}:a]aloop=loop=-1:size=2e+09,atrim=duration=${videoDuration}[bg]`);
         audioStreams.push('[bg]');
     }
 
-    // Per-segment audio: delay each to its segment start time
     for (const [segIdx, audioIdx] of audioInputMap) {
         const delayMs = Math.round(segments[segIdx].startTime * 1000);
         const label = `delayed_${segIdx}`;
@@ -327,21 +288,15 @@ export async function overlayAudio(
         audioStreams.push(`[${label}]`);
     }
 
-    // Mix all audio streams
     if (audioStreams.length > 1) {
         filters.push(
             `${audioStreams.join('')}amix=inputs=${audioStreams.length}:duration=longest:dropout_transition=2[mixed_audio]`,
         );
         args.push('-filter_complex', filters.join(';'), '-map', '0:v', '-map', '[mixed_audio]');
     } else if (audioStreams.length === 1) {
-        if (filters.length > 0) {
-            args.push('-filter_complex', filters.join(';'), '-map', '0:v', '-map', audioStreams[0]);
-        } else {
-            args.push('-map', '0:v', '-map', '1:a');
-        }
+        args.push('-filter_complex', filters.join(';'), '-map', '0:v', '-map', audioStreams[0]);
     }
 
-    // Copy video (no re-encode), encode audio to AAC
     args.push('-c:v', 'copy', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outputFile);
 
     const start = Date.now();

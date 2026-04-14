@@ -42,10 +42,6 @@ export function cleanupTempFiles(
 }
 
 
-// ---------------------------------------------------------------------------
-// Concurrency helper (avoids external dependency)
-// ---------------------------------------------------------------------------
-
 export function pLimit(concurrency: number) {
     let active = 0;
     const queue: (() => void)[] = [];
@@ -67,9 +63,6 @@ export function pLimit(concurrency: number) {
     };
 }
 
-/**
- * Simple parallel task runner with concurrency limit.
- */
 export async function runParallel(tasks: (() => Promise<void>)[], concurrency: number): Promise<void> {
     let active = 0;
     let index = 0;
