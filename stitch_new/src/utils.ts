@@ -23,8 +23,12 @@ export function cleanupTempFiles(
     let removed = 0;
     for (const f of files) {
         try {
-            if (fs.existsSync(f)) { fs.unlinkSync(f); removed++; }
-        } catch { /* ignore */ }
+            if (fs.existsSync(f)) {
+                fs.unlinkSync(f);
+                removed++;
+            }
+        } catch { /* ignore */
+        }
     }
     console.log(`Cleanup: removed ${removed} temp files`);
 }
@@ -53,4 +57,35 @@ export function pLimit(concurrency: number) {
             else queue.push(run);
         });
     };
+}
+
+/**
+ * Simple parallel task runner with concurrency limit.
+ */
+export async function runParallel(tasks: (() => Promise<void>)[], concurrency: number): Promise<void> {
+    let active = 0;
+    let index = 0;
+    const errors: Error[] = [];
+
+    await new Promise<void>((resolve) => {
+        const next = () => {
+            while (active < concurrency && index < tasks.length) {
+                const task = tasks[index++];
+                active++;
+                task()
+                    .catch((err) => errors.push(err as Error))
+                    .finally(() => {
+                        active--;
+                        if (index < tasks.length) next();
+                        else if (active === 0) resolve();
+                    });
+            }
+            if (tasks.length === 0) resolve();
+        };
+        next();
+    });
+
+    if (errors.length > 0) {
+        throw new Error(`${errors.length} download(s) failed:\n${errors.map(e => e.message).join('\n')}`);
+    }
 }
