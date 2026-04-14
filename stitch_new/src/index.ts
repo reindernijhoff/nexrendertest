@@ -68,24 +68,15 @@ program
             const totalStart = Date.now();
             fs.mkdirSync(tmpDir, {recursive: true});
 
-            const overlaps: number[] = Array.isArray(overlap)
-                ? overlap
-                : new Array(Math.max(0, videos.length - 1)).fill(overlap);
-
-            if (overlaps.length !== Math.max(0, videos.length - 1)) {
-                throw new Error(
-                    `overlap array length (${overlaps.length}) must be ${videos.length - 1} (N-1 for ${videos.length} videos)`,
-                );
-            }
-
             const segments: VideoSegment[] = videos.map((v, i) => ({
                 srcVideo: isS3 ? v : path.resolve(v),
                 srcAudio: rawAudio[i]?.trim() || null,
                 localVideo: '',
                 localAudio: null,
                 duration: 0,
-                overlapBefore: i > 0 ? overlaps[i - 1] : 0,
-                overlapAfter: i < videos.length - 1 ? overlaps[i] : 0,
+                overlapBefore: i > 0 ? (Array.isArray(overlap) ? overlap[i - 1] : overlap) : 0,
+                overlapAfter: i < videos.length - 1 ? (Array.isArray(overlap) ? overlap[i] : overlap) : 0,
+                zIndex: (options.zIndex ?? [])[i] ?? (i + 1),
                 startTime: 0,
                 firstDuration: 0,
                 middle: '',
@@ -94,7 +85,7 @@ program
             }));
 
             console.log(`\nStitch pipeline: ${segments.length} videos (${isS3 ? 'S3' : 'local'} mode)`);
-            console.log(`  Overlaps: [${overlaps.join(', ')}]s | Chroma: ${chromaKey} | Similarity: ${similarity} | Blend: ${blend}`);
+            console.log(`  Overlap: ${Array.isArray(overlap) ? `[${overlap.join(', ')}]` : overlap}s | Chroma: ${chromaKey} | Similarity: ${similarity} | Blend: ${blend}`);
             console.log(`  Output: ${output}`);
             console.log(`  Tmp dir: ${tmpDir}`);
             if (isS3) console.log(`  S3: ${s3.bucket} | input: ${s3.inputDir} | output: ${s3.outputDir}`);
@@ -117,8 +108,8 @@ program
             const stitchedDuration = await stitchSegments(segments, transitions, videoOnlyOutput);
 
             console.log('\n=== Step 5: Calculating segment timings ===');
-            const calculatedDuration = calculateTimings(segments, transitions);
-            console.log(`  Probed: ${stitchedDuration.toFixed(3)}s vs calculated: ${calculatedDuration.toFixed(3)}s`);
+            // const calculatedDuration = calculateTimings(segments, transitions);
+            // console.log(`  Probed: ${stitchedDuration.toFixed(3)}s vs calculated: ${calculatedDuration.toFixed(3)}s`);
 
             console.log('\n=== Step 6: Background track ===');
             const bgTrack = await resolveBackgroundTrack(bgTracks, stitchedDuration, tmpDir, s3.bucket, s3.audioDir);

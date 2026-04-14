@@ -102,6 +102,7 @@ node dist/index.js --file job.json
 | `chromaKey` | `#00fe00` | Chroma key color (hex) |
 | `similarity` | `0.05` | Chroma key similarity threshold (0.0–1.0) |
 | `blend` | `0.0` | Chroma key blend/smoothness (0.0–1.0) |
+| `zIndex` | `[1,2,...,N]` | Per-segment z-order array. During a transition, the segment with the higher zIndex is composited on top. Defaults to ascending order (each incoming segment on top of the previous). |
 
 ### `settings`
 

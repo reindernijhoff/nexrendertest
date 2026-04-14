@@ -6,7 +6,7 @@ import {execFile} from "node:child_process";
 export const execFileAsync = promisify(execFile) as (
     file: string,
     args: string[],
-    options: { timeout?: number },
+    options: { timeout?: number; maxBuffer?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 export function cleanupTempFiles(

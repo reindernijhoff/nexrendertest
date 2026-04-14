@@ -47,7 +47,8 @@ async function createSegment(
     await runFfmpeg(args);
 }
 
-async function splitVideo(seg: VideoSegment, index: number, outputDir: string, accel: AccelParams): Promise<void> {
+async function splitVideo(seg: VideoSegment, index: number, outputDir: string): Promise<void> {
+    const accel = await detectAcceleration();
     console.log(`Splitting video ${index}: ${path.basename(seg.localVideo)} (overlap before=${seg.overlapBefore}s after=${seg.overlapAfter}s)`);
 
     if (seg.overlapBefore > 0) {
@@ -82,12 +83,11 @@ async function splitVideo(seg: VideoSegment, index: number, outputDir: string, a
 }
 
 export async function splitAllVideos(segments: VideoSegment[], tmpDir: string): Promise<void> {
-    const accel = await detectAcceleration();
     const limit = pLimit(4);
 
     await Promise.all(
         segments.map((seg, i) =>
-            limit(() => splitVideo(seg, i, tmpDir, accel)),
+            limit(() => splitVideo(seg, i, tmpDir)),
         ),
     );
 }
@@ -99,13 +99,16 @@ async function createTransition(
     chromaKeyColor: string,
     similarity: number,
     blend: number,
-    accel: AccelParams,
+    incomingOnTop = true,
 ): Promise<string> {
-    console.log(`Transition: ${path.basename(endVideo)} → ${path.basename(startVideo)}`);
+    const accel = await detectAcceleration();
+    console.log(`Transition: ${path.basename(endVideo)} → ${path.basename(startVideo)} (${incomingOnTop ? 'incoming' : 'outgoing'} on top)`);
 
     const ckColor = hexToChromaKeyColor(chromaKeyColor);
+    const keyInput = incomingOnTop ? 1 : 0;
+    const bgInput = incomingOnTop ? 0 : 1;
     const filterComplex =
-        `[1:v]chromakey=${ckColor}:${similarity}:${blend}[key];[0:v][key]overlay=shortest=1[out]`;
+        `[${keyInput}:v]chromakey=${ckColor}:${similarity}:${blend}[key];[${bgInput}:v][key]overlay=shortest=1[out]`;
 
     const args = [
         '-y', '-v', 'error',
@@ -139,7 +142,6 @@ export async function createAllTransitions(
     similarity: number,
     blend: number,
 ): Promise<(string | null)[]> {
-    const accel = await detectAcceleration();
     const limit = pLimit(2);
 
     const transitions: (string | null)[] = new Array(segments.length - 1).fill(null);
@@ -152,8 +154,9 @@ export async function createAllTransitions(
                 if (!endVideo || !startVideo) return;
 
                 const output = path.join(tmpDir, `transition_${i}_${i + 1}.mp4`);
+                const incomingOnTop = segments[i + 1].zIndex >= segments[i].zIndex;
                 transitions[i] = await createTransition(
-                    endVideo, startVideo, output, chromaKeyColor, similarity, blend, accel,
+                    endVideo, startVideo, output, chromaKeyColor, similarity, blend, incomingOnTop,
                 );
             }),
         ),
@@ -168,6 +171,8 @@ export async function stitchSegments(
     transitions: (string | null)[],
     outputPath: string,
 ): Promise<number> {
+    const accel = await detectAcceleration();
+
     const sequenceFiles: string[] = [];
     for (let i = 0; i < segments.length; i++) {
         if (segments[i].middle && fs.existsSync(segments[i].middle)) {
@@ -194,7 +199,6 @@ export async function stitchSegments(
         ]);
     } catch {
         console.log('Stream copy failed, re-encoding...');
-        const accel = await detectAcceleration();
         const args = ['-y', '-f', 'concat', '-safe', '0', '-i', concatFile];
 
         if (accel.encoder === 'h264_nvenc') {

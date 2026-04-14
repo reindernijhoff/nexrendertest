@@ -37,10 +37,7 @@ export async function getVideoDuration(filepath: string, maxRetries = 3): Promis
     }
 
     console.warn(`  All ffprobe attempts failed for ${path.basename(filepath)}, trying fallback...`);
-    return getDurationFallback(filepath);
-}
 
-async function getDurationFallback(filepath: string): Promise<number> {
     try {
         await execFileAsync('ffmpeg', ['-i', filepath, '-f', 'null', '-'], {timeout: 60_000});
     } catch (err: unknown) {

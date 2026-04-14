@@ -6,6 +6,7 @@ export interface VideoSegment {
     duration: number;
     overlapBefore: number;
     overlapAfter: number;
+    zIndex: number;
     startTime: number;
     first?: string;
     firstDuration: number;
