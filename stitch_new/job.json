@@ -1,0 +1,19 @@
+{
+  "input": {
+    "videos": ["clip0.mp4", "clip1.mp4", "clip2.mp4"],
+    "audio": ["audio.mp3", "", ""]
+  },
+  "output": {
+    "file": "output.mp4"
+  },
+  "options": {
+    "overlap": 1.0,
+    "chromaKey": "#00fe00",
+    "similarity": 0.05,
+    "blend": 0.0
+  },
+  "settings": {
+    "tmpDir": "./tmp",
+    "cleanupInputFiles": false
+  }
+}

@@ -18,8 +18,8 @@ export interface StitchOptions {
   audioFiles: string[];
   /** Output file path (.mp4) */
   output: string;
-  /** Transition overlap duration in seconds (default 1.0) */
-  overlapDuration: number;
+  /** Transition overlap duration in seconds (default 1.0). Single value or array of N-1 values for N videos. */
+  overlapDuration: number | number[];
   /** Chroma key hex color (default #A6579B) */
   chromaKeyColor: string;
   /** Chroma key similarity threshold 0.0-1.0 (default 0.01) */
@@ -41,4 +41,9 @@ export interface StitchOptions {
   outputDir?: string;
   /** S3 audio directory (prefix for per-segment and background audio) */
   audioDir?: string;
+
+  // --- Settings ---
+
+  /** Whether to delete downloaded/input files after stitching (default true) */
+  cleanupInputFiles?: boolean;
 }

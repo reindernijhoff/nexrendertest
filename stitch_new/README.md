@@ -1,6 +1,6 @@
 # Stitch
 
-Video stitching tool with chroma-key transitions and audio overlay. TypeScript port of `stitch_videos.py`.
+Video stitching tool with chroma-key transitions and audio overlay. All options are specified via a JSON job file.
 
 ## Prerequisites
 
@@ -17,126 +17,111 @@ npm install
 
 ## Usage
 
-### Local mode
-
 ```bash
-npx tsx src/index.ts --videos "clip1.mp4,clip2.mp4,clip3.mp4" -o output.mp4
+npx tsx src/index.ts --file job.json
 ```
 
-### Local mode with audio
+Override the output path from the command line:
 
 ```bash
-npx tsx src/index.ts \
-  --videos "clip1.mp4,clip2.mp4,clip3.mp4" \
-  --audio "voice1.wav,voice2.wav,voice3.wav" \
-  --bg-audio-dir ./assets/audio \
-  --overlap 1.0 \
-  --chroma-key "#00fe00" \
-  --similarity 0.05 \
-  --blend 0.0 \
-  --tmp-dir ./tmp \
-  -o final_output.mp4
+npx tsx src/index.ts --file job.json -o custom_output.mp4
 ```
-
-### S3 mode
-
-When `--bucket` is provided, video/audio paths are treated as S3 keys and downloaded automatically (in parallel). The result is uploaded back to S3. All downloaded temp files are cleaned up after processing.
-
-Video paths are resolved as `s3://{bucket}/{input-dir}/{video}`, audio paths as `s3://{bucket}/{audio-dir}/{audio}`. Full `s3://` URIs are also supported directly.
-
-```bash
-npx tsx src/index.ts \
-  --bucket my-bucket \
-  --input-dir renders/input \
-  --output-dir renders/output \
-  --audio-dir assets/audio \
-  --videos "scene1.mp4,scene2.mp4,scene3.mp4" \
-  --audio "voice1.wav,voice2.wav,voice3.wav" \
-  --overlap 1.0 \
-  --chroma-key "#00fe00" \
-  --similarity 0.05 \
-  -o final_output.mp4
-```
-
-This is equivalent to the Python script's positional args:
-```bash
-python stitch_videos.py my-bucket /tmp/stitch renders/input renders/output \
-  --videos "scene1.mp4,scene2.mp4,scene3.mp4" \
-  --audio "voice1.wav,voice2.wav,voice3.wav" \
-  -o final_output.mp4
-```
-
-> **Note:** The Python script hardcodes `assets/audio` as the S3 audio prefix. In the TS version, use `--audio-dir assets/audio` to match.
 
 ### Production (compiled)
 
 ```bash
 npm run build
-node dist/index.js --videos "clip1.mp4,clip2.mp4,clip3.mp4" -o output.mp4
+node dist/index.js --file job.json
 ```
 
 ## CLI Options
 
-| Option | Default | Description |
+| Option | Required | Description |
 |---|---|---|
-| `--videos` | *required* | Comma-separated video paths (local paths or S3 keys) |
-| `-o, --output` | *required* | Output file path (.mp4) |
-| `--audio` | *(none)* | Comma-separated per-segment audio paths (one per video) |
-| `--bg-audio-dir` | *(none)* | Local directory with background tracks (bg54.wav–bg60.wav) |
-| `--overlap` | `1.0` | Transition overlap duration (seconds) |
-| `--chroma-key` | `#00fe00` | Chroma key color (hex) |
-| `--similarity` | `0.05` | Chroma key similarity threshold (0.0–1.0) |
-| `--blend` | `0.0` | Chroma key blend/smoothness (0.0–1.0) |
-| `--tmp-dir` | `./tmp` | Temporary directory for intermediate files |
-| `--bucket` | *(none)* | S3 bucket name (enables S3 mode) |
-| `--input-dir` | *(none)* | S3 prefix for input videos |
-| `--output-dir` | *(none)* | S3 prefix for uploaded result |
-| `--audio-dir` | *(none)* | S3 prefix for segment and background audio |
+| `--file <path>` | yes | Path to JSON job file |
+| `-o, --output <path>` | no | Output path — overrides `output.file` in the JSON |
+
+## Job File Format
+
+```json
+{
+  "input": {
+    "videos": ["clip0.mp4", "clip1.mp4", "clip2.mp4"],
+    "audio": ["voice.mp3", "", ""],
+    "bgAudioDir": "./assets/audio"
+  },
+  "output": {
+    "file": "output.mp4"
+  },
+  "options": {
+    "overlap": 1.0,
+    "chromaKey": "#00fe00",
+    "similarity": 0.05,
+    "blend": 0.0
+  },
+  "settings": {
+    "tmpDir": "./tmp",
+    "cleanupInputFiles": true
+  },
+  "s3": {
+    "bucket": "my-bucket",
+    "inputDir": "renders/input",
+    "outputDir": "renders/output",
+    "audioDir": "assets/audio"
+  }
+}
+```
+
+### `input`
+
+| Field | Required | Description |
+|---|---|---|
+| `videos` | yes | Array of video file paths (local paths or S3 keys) |
+| `audio` | no | Array of per-segment audio paths, one per video. Use `""` to skip a segment. |
+| `bgAudioDir` | no | Local directory containing background audio tracks (`bg54.wav`–`bg60.wav`) |
+
+### `output`
+
+| Field | Required | Description |
+|---|---|---|
+| `file` | yes* | Output file path (`.mp4`). Can be overridden with `-o` on the CLI. |
+
+### `options`
+
+| Field | Default | Description |
+|---|---|---|
+| `overlap` | `1.0` | Transition overlap in seconds. A single number applies to all transitions. An array of N−1 values (for N videos) sets each transition individually, e.g. `[1.0, 0]`. |
+| `chromaKey` | `#00fe00` | Chroma key color (hex) |
+| `similarity` | `0.05` | Chroma key similarity threshold (0.0–1.0) |
+| `blend` | `0.0` | Chroma key blend/smoothness (0.0–1.0) |
+
+### `settings`
+
+| Field | Default | Description |
+|---|---|---|
+| `tmpDir` | `./tmp` | Temporary directory for intermediate files |
+| `cleanupInputFiles` | `true` | Delete downloaded/input files after stitching. Set to `false` to keep them. |
+
+### `s3` (optional — omit for local-only mode)
+
+When `s3.bucket` is set, video/audio paths are treated as S3 keys and downloaded automatically. The result is uploaded back to S3.
+
+| Field | Description |
+|---|---|
+| `bucket` | S3 bucket name |
+| `inputDir` | S3 prefix for input videos |
+| `outputDir` | S3 prefix for uploaded result |
+| `audioDir` | S3 prefix for segment and background audio |
 
 ## How It Works
 
-1. **Resolve inputs** — use local files directly, or download from S3 when `--bucket` is set
+1. **Resolve inputs** — use local files directly, or download from S3 when `s3.bucket` is set
 2. **Analyze** — get duration of each input video via ffprobe
-3. **Split** — cut each video into `first` / `middle` / `last` segments (overlap-sized)
+3. **Split** — cut each video into `first` / `middle` / `last` segments using per-transition overlap values
 4. **Transitions** — chroma-key composite `video[i].last` + `video[i+1].first` (only the incoming clip is keyed)
 5. **Stitch** — concatenate: `middle₀ → transition₀₁ → middle₁ → ...`
 6. **Timings** — calculate when each segment starts in the final timeline
 7. **Background track** — select and loop a background music file to match duration
 8. **Audio overlay** — mix background + per-segment audio (delayed to segment start times)
 9. **Upload** — upload result to S3 (S3 mode only)
-10. **Cleanup** — remove all intermediate files (splits, transitions, downloaded inputs)
-
-## Programmatic API
-
-```typescript
-import { stitch } from './pipeline.js';
-
-// Local mode
-await stitch({
-  videos: ['clip1.mp4', 'clip2.mp4'],
-  audioFiles: ['voice1.wav', 'voice2.wav'],
-  output: 'output.mp4',
-  overlapDuration: 1.0,
-  chromaKeyColor: '#00fe00',
-  similarity: 0.05,
-  blend: 0.0,
-  tmpDir: './tmp',
-  backgroundTrackDir: './assets/audio',
-});
-
-// S3 mode
-await stitch({
-  videos: ['scene1.mp4', 'scene2.mp4'],
-  audioFiles: ['voice1.wav', 'voice2.wav'],
-  output: 'final.mp4',
-  overlapDuration: 1.0,
-  chromaKeyColor: '#00fe00',
-  similarity: 0.05,
-  blend: 0.0,
-  tmpDir: './tmp',
-  bucket: 'my-bucket',
-  inputDir: 'renders/input',
-  outputDir: 'renders/output',
-  audioDir: 'assets/audio',
-});
-```
+10. **Cleanup** — remove intermediate files (controlled by `settings.cleanupInputFiles`)

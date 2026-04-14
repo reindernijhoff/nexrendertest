@@ -99,36 +99,37 @@ async function splitVideo(
   outputDir: string,
   videoIndex: number,
   duration: number,
-  transitionDuration: number,
+  overlapBefore: number,
+  overlapAfter: number,
   accel: AccelParams,
 ): Promise<VideoParts> {
-  console.log(`Splitting video ${videoIndex}: ${path.basename(inputFile)}`);
+  console.log(`Splitting video ${videoIndex}: ${path.basename(inputFile)} (overlap before=${overlapBefore}s after=${overlapAfter}s)`);
   const parts: VideoParts = { middle: '' };
 
   // First part (transition layer) — skip for video 0 (nothing to transition from)
-  if (videoIndex > 0) {
+  if (overlapBefore > 0) {
     const firstPath = path.join(outputDir, `video_${videoIndex}_first.mp4`);
-    await createSegment(inputFile, firstPath, accel, 0, transitionDuration);
+    await createSegment(inputFile, firstPath, accel, 0, overlapBefore);
     parts.first = firstPath;
   }
 
   // Last part (transition layer)
-  if (duration > transitionDuration) {
+  if (overlapAfter > 0 && duration > overlapAfter) {
     const lastPath = path.join(outputDir, `video_${videoIndex}_last.mp4`);
-    await createSegment(inputFile, lastPath, accel, duration - transitionDuration, transitionDuration);
+    await createSegment(inputFile, lastPath, accel, duration - overlapAfter, overlapAfter);
     parts.last = lastPath;
   }
 
   // Middle part (plays as-is between transitions)
   const middlePath = path.join(outputDir, `video_${videoIndex}_middle.mp4`);
 
-  if (videoIndex === 0) {
+  if (overlapBefore === 0) {
     // First video: middle = everything except the last overlap
-    await createSegment(inputFile, middlePath, accel, 0, duration - transitionDuration);
+    await createSegment(inputFile, middlePath, accel, 0, duration - overlapAfter);
   } else {
-    const middleDuration = duration - 2 * transitionDuration;
+    const middleDuration = duration - overlapBefore - overlapAfter;
     if (middleDuration > 0) {
-      await createSegment(inputFile, middlePath, accel, transitionDuration, middleDuration);
+      await createSegment(inputFile, middlePath, accel, overlapBefore, middleDuration);
     } else {
       // Video too short for a proper middle — create minimal placeholder
       await runFfmpeg([
@@ -146,16 +147,18 @@ async function splitAllVideos(
   videoPaths: string[],
   durations: number[],
   tmpDir: string,
-  transitionDuration: number,
+  overlaps: number[],
 ): Promise<VideoParts[]> {
   console.log(`\n=== Step 2: Splitting ${videoPaths.length} videos ===`);
   const accel = await detectAcceleration();
   const limit = pLimit(4);
 
   const parts = await Promise.all(
-    videoPaths.map((videoPath, i) =>
-      limit(() => splitVideo(videoPath, tmpDir, i, durations[i], transitionDuration, accel)),
-    ),
+    videoPaths.map((videoPath, i) => {
+      const overlapBefore = i > 0 ? overlaps[i - 1] : 0;
+      const overlapAfter = i < videoPaths.length - 1 ? overlaps[i] : 0;
+      return limit(() => splitVideo(videoPath, tmpDir, i, durations[i], overlapBefore, overlapAfter, accel));
+    }),
   );
 
   return parts;
@@ -495,6 +498,7 @@ export async function stitch(options: StitchOptions): Promise<string> {
     inputDir,
     outputDir,
     audioDir,
+    cleanupInputFiles = true,
   } = options;
 
   const isS3Mode = !!bucket;
@@ -502,8 +506,19 @@ export async function stitch(options: StitchOptions): Promise<string> {
   // Ensure tmp dir exists
   fs.mkdirSync(tmpDir, { recursive: true });
 
+  // Normalize overlapDuration into a per-transition array of length N-1
+  const overlaps: number[] = Array.isArray(overlapDuration)
+    ? overlapDuration
+    : new Array(Math.max(0, videos.length - 1)).fill(overlapDuration);
+
+  if (overlaps.length !== Math.max(0, videos.length - 1)) {
+    throw new Error(
+      `overlap array length (${overlaps.length}) must be ${videos.length - 1} (N-1 for ${videos.length} videos)`,
+    );
+  }
+
   console.log(`\nStitch pipeline: ${videos.length} videos (${isS3Mode ? 'S3' : 'local'} mode)`);
-  console.log(`  Overlap: ${overlapDuration}s | Chroma: ${chromaKeyColor} | Similarity: ${similarity} | Blend: ${blend}`);
+  console.log(`  Overlaps: [${overlaps.join(', ')}]s | Chroma: ${chromaKeyColor} | Similarity: ${similarity} | Blend: ${blend}`);
   console.log(`  Output: ${output}`);
   console.log(`  Tmp dir: ${tmpDir}`);
   if (isS3Mode) console.log(`  S3: ${bucket} | input: ${inputDir} | output: ${outputDir}`);
@@ -517,7 +532,7 @@ export async function stitch(options: StitchOptions): Promise<string> {
   const durations = await analyzeVideos(localVideos);
 
   // 2. Split
-  const videoParts = await splitAllVideos(localVideos, durations, tmpDir, overlapDuration);
+  const videoParts = await splitAllVideos(localVideos, durations, tmpDir, overlaps);
 
   // 3. Transitions
   const transitions = await createAllTransitions(videoParts, tmpDir, chromaKeyColor, similarity, blend);
@@ -556,8 +571,8 @@ export async function stitch(options: StitchOptions): Promise<string> {
   cleanupTempFiles(videoParts, transitions, [
     videoOnlyOutput,
     bgTrack,
-    ...localVideos,
-    ...localAudio,
+    ...(cleanupInputFiles ? localVideos : []),
+    ...(cleanupInputFiles ? localAudio : []),
   ]);
 
   const totalTime = (Date.now() - totalStart) / 1000;
