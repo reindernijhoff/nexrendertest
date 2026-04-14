@@ -43,7 +43,7 @@ function pLimit(concurrency: number) {
 // Step 1: Analyze — get durations for all input videos
 // ---------------------------------------------------------------------------
 
-async function analyzeVideos(videoPaths: string[]): Promise<number[]> {
+export async function analyzeVideos(videoPaths: string[]): Promise<number[]> {
   console.log(`\n=== Step 1: Analyzing ${videoPaths.length} videos ===`);
   const limit = pLimit(8);
 
@@ -143,7 +143,7 @@ async function splitVideo(
   return parts;
 }
 
-async function splitAllVideos(
+export async function splitAllVideos(
   videoPaths: string[],
   durations: number[],
   tmpDir: string,
@@ -208,7 +208,7 @@ async function createTransition(
   return outputPath;
 }
 
-async function createAllTransitions(
+export async function createAllTransitions(
   videoParts: VideoParts[],
   tmpDir: string,
   chromaKeyColor: string,
@@ -245,7 +245,7 @@ async function createAllTransitions(
 // Step 4: Concatenate all segments into the final video
 // ---------------------------------------------------------------------------
 
-async function stitchSegments(
+export async function stitchSegments(
   videoParts: VideoParts[],
   transitions: (string | null)[],
   outputPath: string,
@@ -306,7 +306,7 @@ async function stitchSegments(
 // Step 5: Calculate when each video segment starts in the final timeline
 // ---------------------------------------------------------------------------
 
-async function calculateTimings(
+export async function calculateTimings(
   videoParts: VideoParts[],
   transitions: (string | null)[],
 ): Promise<number[]> {
@@ -335,7 +335,7 @@ async function calculateTimings(
 // Step 6: Select the best-matching background music track
 // ---------------------------------------------------------------------------
 
-function selectBackgroundTrackName(videoDuration: number): string {
+export function selectBackgroundTrackName(videoDuration: number): string {
   if (videoDuration <= 54) return 'bg54.wav';
   if (videoDuration <= 55) return 'bg55.wav';
   if (videoDuration <= 56) return 'bg56.wav';
@@ -345,7 +345,7 @@ function selectBackgroundTrackName(videoDuration: number): string {
   return 'bg60.wav';
 }
 
-function selectBackgroundTrack(videoDuration: number, bgDir: string): string | null {
+export function selectBackgroundTrack(videoDuration: number, bgDir: string): string | null {
   if (!bgDir || !fs.existsSync(bgDir)) return null;
 
   const bgFile = selectBackgroundTrackName(videoDuration);
@@ -363,7 +363,7 @@ function selectBackgroundTrack(videoDuration: number, bgDir: string): string | n
 // Step 7: Mix audio — background track + per-segment audio with delays
 // ---------------------------------------------------------------------------
 
-async function overlayAudio(
+export async function overlayAudio(
   videoFile: string,
   audioFiles: (string | null)[],
   backgroundTrack: string | null,
@@ -449,7 +449,7 @@ async function overlayAudio(
 // Cleanup helper
 // ---------------------------------------------------------------------------
 
-function cleanupTempFiles(
+export function cleanupTempFiles(
   videoParts: VideoParts[],
   transitions: (string | null)[],
   extras: (string | null | undefined)[],
